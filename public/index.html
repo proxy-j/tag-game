@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Tag Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #loginScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            z-index: 1000;
+        }
+        
+        #loginScreen.hidden {
+            display: none;
+        }
+        
+        #loginScreen h1 {
+            margin-bottom: 20px;
+            font-size: 48px;
+        }
+        
+        #nameInput {
+            padding: 15px;
+            font-size: 20px;
+            border: 2px solid #fff;
+            background: #222;
+            color: white;
+            margin-bottom: 20px;
+            width: 300px;
+        }
+        
+        #joinBtn {
+            padding: 15px 40px;
+            font-size: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        #joinBtn:hover {
+            background: #45a049;
+        }
+        
+        #gameCanvas {
+            display: block;
+            background: #000;
+        }
+        
+        #info {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 18px;
+        }
+        
+        #info div {
+            margin: 5px 0;
+        }
+        
+        .tagger {
+            color: #ff4444;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="loginScreen">
+        <h1>TAG GAME</h1>
+        <input type="text" id="nameInput" placeholder="Enter your name" maxlength="15">
+        <button id="joinBtn">Join Game</button>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="info">
+        <div id="playerName"></div>
+        <div id="status"></div>
+        <div id="mapName"></div>
+    </div>
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const loginScreen = document.getElementById('loginScreen');
+        const nameInput = document.getElementById('nameInput');
+        const joinBtn = document.getElementById('joinBtn');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        let socket;
+        let players = {};
+        let myId = null;
+        let keys = {};
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        // Join game
+        joinBtn.addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if (name) {
+                loginScreen.classList.add('hidden');
+                initGame(name);
+            }
+        });
+        
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                joinBtn.click();
+            }
+        });
+        
+        function initGame(playerName) {
+            socket = io();
+            
+            socket.on('connect', () => {
+                socket.emit('join', playerName);
+            });
+            
+            socket.on('init', (data) => {
+                myId = data.id;
+                players = data.players;
+                updateInfo();
+            });
+            
+            socket.on('players', (serverPlayers) => {
+                players = serverPlayers;
+                updateInfo();
+            });
+            
+            // Keyboard controls
+            window.addEventListener('keydown', (e) => {
+                if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(e.key)) {
+                    e.preventDefault();
+                    keys[e.key] = true;
+                    sendInput();
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(e.key)) {
+                    e.preventDefault();
+                    keys[e.key] = false;
+                    sendInput();
+                }
+            });
+            
+            // Game loop
+            setInterval(render, 1000 / 60);
+        }
+        
+        function sendInput() {
+            const input = {
+                up: keys['w'] || keys['ArrowUp'],
+                left: keys['a'] || keys['ArrowLeft'],
+                down: keys['s'] || keys['ArrowDown'],
+                right: keys['d'] || keys['ArrowRight']
+            };
+            socket.emit('input', input);
+        }
+        
+        function updateInfo() {
+            if (!myId || !players[myId]) return;
+            
+            const me = players[myId];
+            document.getElementById('playerName').textContent = `Name: ${me.name}`;
+            
+            if (me.frozen) {
+                const timeLeft = Math.ceil(me.frozenUntil - Date.now()) / 1000;
+                document.getElementById('status').innerHTML = 
+                    `<span class="tagger">FROZEN (${timeLeft.toFixed(1)}s)</span>`;
+            } else if (me.isTagger) {
+                document.getElementById('status').innerHTML = 
+                    '<span class="tagger">YOU ARE IT!</span>';
+            } else {
+                document.getElementById('status').textContent = 'Run away!';
+            }
+            
+            document.getElementById('mapName').textContent = `Map: ${me.map || 'Plus'}`;
+        }
+        
+        function render() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw walls (get from any player's data)
+            const anyPlayer = Object.values(players)[0];
+            if (anyPlayer && anyPlayer.walls) {
+                ctx.fillStyle = '#555';
+                anyPlayer.walls.forEach(wall => {
+                    ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+                });
+            }
+            
+            // Draw players
+            for (let id in players) {
+                const p = players[id];
+                
+                // Draw player dot
+                ctx.fillStyle = p.frozen ? '#666' : (p.isTagger ? '#ff0000' : p.color);
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw name
+                ctx.fillStyle = '#fff';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(p.name, p.x, p.y - 25);
+                
+                // Draw frozen indicator
+                if (p.frozen) {
+                    ctx.fillStyle = '#00ffff';
+                    ctx.font = '12px Arial';
+                    const timeLeft = Math.ceil((p.frozenUntil - Date.now()) / 1000);
+                    ctx.fillText(`FROZEN ${timeLeft}s`, p.x, p.y + 30);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
