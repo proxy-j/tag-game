@@ -13,7 +13,7 @@
         
         body {
             font-family: Arial, sans-serif;
-            background: #111;
+            background: #1a1a1a;
             color: white;
             overflow: hidden;
         }
@@ -28,7 +28,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: #000;
+            background: #1a1a1a;
             z-index: 1000;
         }
         
@@ -67,7 +67,7 @@
         
         #gameCanvas {
             display: block;
-            background: #000;
+            background: #1a1a1a;
         }
         
         #info {
@@ -120,11 +120,15 @@
         let players = {};
         let myId = null;
         let keys = {};
+        let portals = [];
         
         // Handle window resize
         window.addEventListener('resize', () => {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+            if (socket && socket.connected) {
+                socket.emit('screenSize', { width: canvas.width, height: canvas.height });
+            }
         });
         
         // Join game
@@ -146,17 +150,23 @@
             socket = io();
             
             socket.on('connect', () => {
-                socket.emit('join', playerName);
+                socket.emit('join', {
+                    name: playerName,
+                    screenWidth: canvas.width,
+                    screenHeight: canvas.height
+                });
             });
             
             socket.on('init', (data) => {
                 myId = data.id;
                 players = data.players;
+                portals = data.portals || [];
                 updateInfo();
             });
             
-            socket.on('players', (serverPlayers) => {
-                players = serverPlayers;
+            socket.on('players', (data) => {
+                players = data.players;
+                portals = data.portals || [];
                 updateInfo();
             });
             
@@ -198,7 +208,7 @@
             document.getElementById('playerName').textContent = `Name: ${me.name}`;
             
             if (me.frozen) {
-                const timeLeft = Math.ceil(me.frozenUntil - Date.now()) / 1000;
+                const timeLeft = Math.ceil((me.frozenUntil - Date.now()) / 1000);
                 document.getElementById('status').innerHTML = 
                     `<span class="tagger">FROZEN (${timeLeft.toFixed(1)}s)</span>`;
             } else if (me.isTagger) {
@@ -212,7 +222,7 @@
         }
         
         function render() {
-            ctx.fillStyle = '#000';
+            ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             // Draw walls (get from any player's data)
@@ -221,6 +231,42 @@
                 ctx.fillStyle = '#555';
                 anyPlayer.walls.forEach(wall => {
                     ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+                });
+            }
+            
+            // Draw portals
+            if (portals && portals.length > 0) {
+                portals.forEach((portal, i) => {
+                    // Animated portal effect
+                    const time = Date.now() / 1000;
+                    const pulse = Math.sin(time * 3 + i) * 0.3 + 0.7;
+                    
+                    // Outer glow
+                    const gradient = ctx.createRadialGradient(
+                        portal.x, portal.y, 0,
+                        portal.x, portal.y, portal.radius * 1.5
+                    );
+                    gradient.addColorStop(0, `rgba(138, 43, 226, ${pulse})`);
+                    gradient.addColorStop(0.5, `rgba(138, 43, 226, ${pulse * 0.5})`);
+                    gradient.addColorStop(1, 'rgba(138, 43, 226, 0)');
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(portal.x, portal.y, portal.radius * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Inner portal
+                    ctx.fillStyle = `rgba(186, 85, 211, ${pulse})`;
+                    ctx.beginPath();
+                    ctx.arc(portal.x, portal.y, portal.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Portal number
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText((i + 1).toString(), portal.x, portal.y);
                 });
             }
             
